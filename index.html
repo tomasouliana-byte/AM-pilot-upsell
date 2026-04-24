@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AM Italy Upsell Leaderboard</title>
+    <!-- Essential Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .shimmer {
+            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 100%);
+            background-size: 200% 100%;
+            animation: shimmer 3s infinite linear;
+        }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .bar-transition { transition: width 1.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .podium-card { transition: all 0.3s ease; }
+        .podium-card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 text-slate-900">
+    <div id="app" class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <header class="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-200 p-8 mb-8 flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
+            <div class="relative z-10">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="px-4 py-1 bg-blue-600 text-white text-[10px] font-black rounded-full uppercase tracking-[0.2em]">Live Competition</span>
+                    <span id="update-time" class="text-slate-400 text-xs font-medium">Syncing...</span>
+                </div>
+                <h1 class="text-4xl font-black text-slate-900 tracking-tight leading-none">AM Italy Upsell<br><span class="text-blue-600 italic">Leaderboard</span></h1>
+            </div>
+            <div id="stats" class="relative z-10"></div>
+        </header>
+
+        <div id="main-content">
+            <!-- Loading State -->
+            <div class="flex flex-col items-center justify-center py-24 text-slate-300">
+                <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-100 border-b-blue-600 mb-4"></div>
+                <p class="font-bold uppercase tracking-widest text-xs">Authenticating with Google Sheets...</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-12 text-center pb-8">
+            <div class="inline-flex items-center gap-4 bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm">
+                <button onclick="updateLeaderboard()" class="text-[10px] text-blue-600 font-black uppercase tracking-widest hover:text-blue-800 transition-colors">
+                    🔄 Sync Now
+                </button>
+                <div class="w-px h-4 bg-slate-200"></div>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                    Automated Recap Updates
+                </p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6XFMPsUzIfkiclyMTRuN-SV2ioJEQY2p-dP1FIDsoDe8JA_DHQmOabtJHMr8V_U0BQjs7O3v9uBK5/pub?gid=0&single=true&output=csv";
+
+        async function updateLeaderboard() {
+            const container = document.getElementById('main-content');
+            const timeLabel = document.getElementById('update-time');
+            
+            try {
+                const response = await fetch(`${CSV_URL}&t=${Date.now()}`);
+                if (!response.ok) throw new Error();
+                const csvText = await response.text();
+
+                Papa.parse(csvText, {
+                    header: false,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        const rows = results.data;
+                        const data = rows.map(row => ({
+                            name: (row[4] || "").toString().trim(),
+                            score: parseInt((row[5] || "").toString().trim().replace(/,/g, ''))
+                        }))
+                        .filter(item => item.name && item.name !== "" && !isNaN(item.score) && item.name.toLowerCase() !== "name")
+                        .sort((a, b) => b.score - a.score);
+
+                        if (data.length === 0) {
+                            container.innerHTML = `<div class="p-20 text-center bg-white rounded-3xl border border-dashed border-slate-300 text-slate-400 font-bold uppercase tracking-widest text-xs">Waiting for Data...</div>`;
+                            return;
+                        }
+
+                        render(data);
+                        timeLabel.innerText = `Last updated: ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                    }
+                });
+            } catch (err) {
+                container.innerHTML = `
+                <div class="p-12 text-center bg-red-50 text-red-600 rounded-3xl border border-red-100">
+                    <p class="font-black text-xl mb-2 italic">CONNECTION INTERRUPTED</p>
+                    <p class="text-xs opacity-70 uppercase tracking-widest font-bold">Please check your office VPN or network connection.</p>
+                </div>`;
+            }
+        }
+
+        function render(data) {
+            const container = document.getElementById('main-content');
+            const statsContainer = document.getElementById('stats');
+            const maxScore = Math.max(...data.map(d => d.score), 1);
+            
+            statsContainer.innerHTML = `
+                <div class="flex flex-col items-end">
+                    <p class="text-[10px] text-blue-600 font-black uppercase tracking-[0.2em] mb-1">Target Excellence</p>
+                    <div class="bg-blue-600 text-white px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/20">
+                        <span class="text-xs font-bold uppercase opacity-70 block leading-none mb-1">Top Score</span>
+                        <span class="text-3xl font-black">${maxScore}</span>
+                    </div>
+                </div>`;
+
+            let html = `
+                <!-- Top 3 Winners -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                    ${data.slice(0, 3).map((p, i) => `
+                        <div class="podium-card relative overflow-hidden rounded-3xl p-8 border-2 ${i === 0 ? 'bg-slate-900 text-white border-slate-800 shadow-2xl scale-105 z-10' : 'bg-white border-slate-100 shadow-xl'}">
+                            ${i === 0 ? '<div class="absolute top-0 right-0 w-24 h-24 bg-blue-600 rounded-full -mr-12 -mt-12 opacity-20 blur-2xl"></div>' : ''}
+                            <div class="flex justify-between items-start mb-4 relative z-10">
+                                <span class="text-4xl font-black italic ${i === 0 ? 'text-blue-500' : 'text-slate-100'}">0${i+1}</span>
+                                <div class="w-10 h-10 flex items-center justify-center rounded-xl ${i === 0 ? 'bg-blue-600' : 'bg-slate-50 text-2xl'}">
+                                    ${i === 0 ? '👑' : i === 1 ? '🥈' : '🥉'}
+                                </div>
+                            </div>
+                            <h3 class="font-black text-xl leading-tight mb-2 uppercase tracking-tight">${p.name}</h3>
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-3xl font-black ${i === 0 ? 'text-blue-400' : 'text-blue-600'}">${p.score}</span>
+                                <span class="text-[10px] font-bold uppercase opacity-50 tracking-widest">Points</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Leaderboard List -->
+                <div class="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-200 overflow-hidden">
+                    <div class="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                        <h2 class="font-black text-slate-900 uppercase tracking-widest text-xs flex items-center gap-3">
+                            <span class="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></span>
+                            Full Rankings
+                        </h2>
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">${data.length} Participants</span>
+                    </div>
+                    <div class="p-8 space-y-8">
+                        ${data.map((p, i) => `
+                            <div class="flex items-center gap-6 group">
+                                <div class="w-8 text-center font-black text-slate-200 group-hover:text-blue-600 transition-colors italic text-xl">#${i + 1}</div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-end mb-2">
+                                        <span class="font-bold text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors">${p.name}</span>
+                                        <span class="text-sm font-black text-slate-900">${p.score} <span class="text-[8px] opacity-30">PTS</span></span>
+                                    </div>
+                                    <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden relative">
+                                        <div class="h-full rounded-full bar-transition relative ${i < 3 ? 'bg-blue-600 shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 'bg-slate-300'}" 
+                                             style="width: ${(p.score / maxScore) * 100}%">
+                                            <div class="absolute inset-0 shimmer opacity-30"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+
+            container.innerHTML = html;
+        }
+
+        updateLeaderboard();
+        setInterval(updateLeaderboard, 60000);
+    </script>
+</body>
+</html>
