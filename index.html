@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AM Italy Upsell Leaderboard</title>
+    <!-- Essential Libraries with Fallback Logic -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -16,6 +17,7 @@
         }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
         .bar-transition { transition: width 1.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .hidden-emergency { display: none; }
     </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 text-slate-900">
@@ -33,19 +35,28 @@
         </header>
 
         <div id="main-content">
-            <div id="loader" class="flex flex-col items-center justify-center py-24 text-slate-300 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-100 border-b-blue-600 mb-4"></div>
-                <p class="font-bold uppercase tracking-widest text-xs animate-pulse text-slate-400">Authenticating with Sheets...</p>
-                <p id="timeout-msg" class="text-[10px] mt-4 text-slate-300 opacity-0 transition-opacity duration-500">Still trying... check your VPN if this takes > 10s</p>
+            <div id="loader" class="flex flex-col items-center justify-center py-24 text-slate-300 bg-white rounded-3xl border border-slate-100 shadow-sm transition-all duration-500">
+                <div id="spinner" class="animate-spin rounded-full h-12 w-12 border-4 border-blue-100 border-b-blue-600 mb-4"></div>
+                <p id="loading-text" class="font-bold uppercase tracking-widest text-xs text-slate-400">Requesting Spreadsheet Data...</p>
+                
+                <!-- Emergency Help UI (Hidden by default) -->
+                <div id="emergency-ui" class="hidden-emergency mt-8 p-6 bg-amber-50 rounded-2xl border border-amber-100 max-w-sm text-center">
+                    <p class="text-amber-800 text-xs font-bold mb-4 uppercase tracking-tight">⚠️ Connection taking too long</p>
+                    <p class="text-amber-700 text-[10px] leading-relaxed mb-4">Your office network (Teads VPN) might be blocking this page's ability to talk to Google. Try the button below:</p>
+                    <a href="https://docs.google.com/spreadsheets/d/e/2PACX-1vR6XFMPsUzIfkiclyMTRuN-SV2ioJEQY2p-dP1FIDsoDe8JA_DHQmOabtJHMr8V_U0BQjs7O3v9uBK5/pub?gid=0&single=true&output=csv" 
+                       target="_blank" 
+                       class="inline-block bg-amber-600 text-white text-[10px] font-black px-6 py-3 rounded-xl uppercase tracking-widest shadow-lg shadow-amber-600/20">
+                       Open Raw Scores
+                    </a>
+                </div>
             </div>
         </div>
 
-        <!-- Debug Footer -->
         <footer class="mt-12 text-center border-t border-slate-200 pt-8">
             <div class="inline-flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 <span>Refreshes every 5 mins</span>
                 <span class="w-1 h-1 bg-slate-300 rounded-full"></span>
-                <button onclick="updateLeaderboard()" class="hover:text-blue-600 transition-colors underline underline-offset-4">Force Refresh</button>
+                <button onclick="updateLeaderboard()" class="hover:text-blue-600 transition-colors underline underline-offset-4">Manual Refresh</button>
             </div>
         </footer>
     </div>
@@ -53,66 +64,89 @@
     <script>
         const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6XFMPsUzIfkiclyMTRuN-SV2ioJEQY2p-dP1FIDsoDe8JA_DHQmOabtJHMr8V_U0BQjs7O3v9uBK5/pub?gid=0&single=true&output=csv";
 
+        // Emergency timeout - shows help if nothing happens within 5 seconds
+        const emergencyTimer = setTimeout(() => {
+            const emergency = document.getElementById('emergency-ui');
+            if (emergency) emergency.style.display = 'block';
+            console.warn("Connection is hanging. Showing emergency UI.");
+        }, 5000);
+
         async function updateLeaderboard() {
             const container = document.getElementById('main-content');
             const timeLabel = document.getElementById('update-time');
             const badge = document.getElementById('status-badge');
-            const timeoutMsg = document.getElementById('timeout-msg');
             
-            // Show timeout message after 5 seconds
-            const timer = setTimeout(() => {
-                if (timeoutMsg) timeoutMsg.classList.remove('opacity-0');
-            }, 5000);
-
             try {
-                // Using a standard fetch with a cache-buster
+                // Check if PapaParse loaded. If not, we use a basic fallback parser
+                const usePapa = typeof Papa !== 'undefined';
+                
                 const controller = new AbortController();
-                const id = setTimeout(() => controller.abort(), 15000); // 15s timeout
+                const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s hard cut-off
 
-                const response = await fetch(`${CSV_URL}&t=${Date.now()}`, { signal: controller.signal });
-                clearTimeout(id);
-                clearTimeout(timer);
+                const response = await fetch(`${CSV_URL}&t=${Date.now()}`, { 
+                    signal: controller.signal 
+                });
+                
+                clearTimeout(timeoutId);
+                clearTimeout(emergencyTimer);
 
-                if (!response.ok) throw new Error("Google responded with an error.");
+                if (!response.ok) throw new Error(`Google Error: ${response.status}`);
                 
                 const csvText = await response.text();
 
-                Papa.parse(csvText, {
-                    header: false,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        const rows = results.data;
-                        const data = rows.map(row => ({
-                            name: (row[4] || "").toString().trim(),
-                            score: parseInt((row[5] || "").toString().trim().replace(/,/g, ''))
-                        }))
-                        .filter(item => item.name && item.name !== "" && !isNaN(item.score) && item.name.toLowerCase() !== "name")
-                        .sort((a, b) => b.score - a.score);
+                const processData = (parsedRows) => {
+                    const data = parsedRows.map(row => ({
+                        name: (row[4] || "").toString().trim(),
+                        score: parseInt((row[5] || "").toString().trim().replace(/,/g, ''))
+                    }))
+                    .filter(item => item.name && item.name !== "" && !isNaN(item.score) && item.name.toLowerCase() !== "name")
+                    .sort((a, b) => b.score - a.score);
 
-                        if (data.length === 0) {
-                            badge.innerText = "Empty Data";
-                            badge.className = "px-4 py-1 bg-slate-100 text-slate-600 text-[10px] font-black rounded-full uppercase tracking-[0.2em]";
-                            container.innerHTML = `<div class="p-20 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 font-bold uppercase tracking-widest text-xs">Sync OK but No Scores Found in Column E/F</div>`;
-                            return;
-                        }
-
-                        render(data);
-                        badge.innerText = "Live Sync";
-                        badge.className = "px-4 py-1 bg-green-100 text-green-700 text-[10px] font-black rounded-full uppercase tracking-[0.2em]";
-                        timeLabel.innerText = `Last update: ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                    if (data.length === 0) {
+                        badge.innerText = "No Scores Found";
+                        badge.className = "px-4 py-1 bg-slate-100 text-slate-600 text-[10px] font-black rounded-full uppercase tracking-[0.2em]";
+                        container.innerHTML = `<div class="p-20 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 font-bold uppercase tracking-widest text-xs">Connected but Recap Columns E/F are empty.</div>`;
+                        return;
                     }
-                });
+
+                    render(data);
+                    badge.innerText = "Live Sync";
+                    badge.className = "px-4 py-1 bg-green-100 text-green-700 text-[10px] font-black rounded-full uppercase tracking-[0.2em]";
+                    timeLabel.innerText = `Last update: ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                };
+
+                if (usePapa) {
+                    Papa.parse(csvText, {
+                        header: false,
+                        skipEmptyLines: true,
+                        complete: (results) => processData(results.data)
+                    });
+                } else {
+                    // Primitive fallback parser if CDN failed
+                    const simpleRows = csvText.split('\n').map(r => r.split(','));
+                    processData(simpleRows);
+                }
+
             } catch (err) {
-                clearTimeout(timer);
-                badge.innerText = "Connection Failed";
+                clearTimeout(emergencyTimer);
+                badge.innerText = "Connection Blocked";
                 badge.className = "px-4 py-1 bg-red-100 text-red-700 text-[10px] font-black rounded-full uppercase tracking-[0.2em]";
+                
                 container.innerHTML = `
                 <div class="p-12 text-center bg-red-50 text-red-600 rounded-3xl border border-red-100 shadow-sm">
-                    <p class="font-black text-xl mb-2 italic uppercase">Network Timeout</p>
-                    <p class="text-xs opacity-80 uppercase tracking-widest font-bold mb-6">Teads firewall or VPN is blocking the Google Sheets link.</p>
-                    <div class="flex flex-col gap-3 max-w-xs mx-auto">
-                        <a href="${CSV_URL}" target="_blank" class="bg-blue-600 text-white text-[10px] font-black py-3 rounded-xl uppercase tracking-widest shadow-lg shadow-blue-600/30">Manual Check Source</a>
-                        <p class="text-[9px] text-slate-400 normal-case leading-relaxed">If the link above asks for a login, the sheet isn't public. If it works, the office network is blocking this website from talking to Google.</p>
+                    <p class="font-black text-xl mb-2 italic uppercase tracking-tight">Sync Refused</p>
+                    <p class="text-xs opacity-80 uppercase tracking-widest font-bold mb-8 leading-loose">Teads Security or VPN is blocking the link to Google Sheets.</p>
+                    
+                    <div class="flex flex-col gap-4 max-w-xs mx-auto">
+                        <a href="${CSV_URL}" target="_blank" class="bg-blue-600 text-white text-[10px] font-black py-4 rounded-2xl uppercase tracking-widest shadow-xl shadow-blue-600/30">
+                            Check Spreadsheet Directly
+                        </a>
+                        <button onclick="location.reload()" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600">
+                            Try Again
+                        </button>
+                        <p class="text-[9px] text-slate-400 normal-case leading-relaxed mt-4 italic">
+                            Tip: Open this link on your personal phone (not on office Wi-Fi) to see the live board.
+                        </p>
                     </div>
                 </div>`;
             }
@@ -150,7 +184,7 @@
                 <div class="bg-white rounded-[2rem] shadow-xl shadow-blue-900/5 border border-slate-200 p-8 space-y-8">
                     <div class="flex items-center justify-between pb-2 border-b border-slate-50">
                          <h2 class="font-black text-slate-400 uppercase tracking-[0.2em] text-[10px]">Current Standings</h2>
-                         <span class="text-[10px] text-slate-300 font-bold uppercase">${data.length} Participants</span>
+                         <span class="text-[10px] text-slate-300 font-bold uppercase tracking-widest">${data.length} AMs Active</span>
                     </div>
                     ${data.map((p, i) => `
                         <div class="flex items-center gap-6 group">
@@ -173,10 +207,10 @@
             container.innerHTML = html;
         }
 
-        // Run immediately
+        // Initialize immediately
         updateLeaderboard();
         
-        // Refresh every 5 minutes
+        // Auto-refresh every 5 minutes
         setInterval(updateLeaderboard, 300000);
     </script>
 </body>
